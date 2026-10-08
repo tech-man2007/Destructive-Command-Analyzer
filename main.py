@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import ctypes
+import threading
 import psutil
 from datetime import datetime
 from collections import defaultdict
@@ -61,21 +62,21 @@ class LocalSecAuditorApp(ctk.CTk):
         self.scan_ports_btn = ctk.CTkButton(
             self.btn_frame, 
             text="Inspect Listening Ports", 
-            command=self.scan_network_ports
+            command=self.start_port_scan
         )
         self.scan_ports_btn.pack(side="left", padx=5, pady=10)
 
         self.scan_secrets_btn = ctk.CTkButton(
             self.btn_frame, 
             text="Scan Secrets & Hardcoded Keys", 
-            command=self.scan_sensitive_files
+            command=self.start_secret_scan
         )
         self.scan_secrets_btn.pack(side="left", padx=5, pady=10)
 
         self.scan_logs_btn = ctk.CTkButton(
             self.btn_frame, 
             text="Scan Failed Logins (Admin)", 
-            command=self.scan_brute_force
+            command=self.start_log_scan
         )
         self.scan_logs_btn.pack(side="left", padx=5, pady=10)
 
@@ -102,13 +103,37 @@ class LocalSecAuditorApp(ctk.CTk):
             self.log_message("[NOTE] Running as Standard User. Network Inspector & Secret Finder modules are fully enabled.\n")
 
     def log_message(self, text):
+        """Thread-safe UI logger."""
+        self.after(0, self._append_text, text)
+
+    def _append_text(self, text):
         self.output_textbox.insert("end", text + "\n")
         self.output_textbox.see("end")
 
     def clear_output(self):
         self.output_textbox.delete("1.0", "end")
 
-    def scan_sensitive_files(self):
+    def toggle_buttons(self, state):
+        """Enable or disable scan buttons during processing."""
+        self.after(0, lambda: self.scan_ports_btn.configure(state=state))
+        self.after(0, lambda: self.scan_secrets_btn.configure(state=state))
+        self.after(0, lambda: self.scan_logs_btn.configure(state=state))
+
+    # --- THREAD WRAPPERS ---
+    def start_secret_scan(self):
+        self.toggle_buttons("disabled")
+        threading.Thread(target=self._scan_sensitive_files_worker, daemon=True).start()
+
+    def start_port_scan(self):
+        self.toggle_buttons("disabled")
+        threading.Thread(target=self._scan_network_ports_worker, daemon=True).start()
+
+    def start_log_scan(self):
+        self.toggle_buttons("disabled")
+        threading.Thread(target=self._scan_brute_force_worker, daemon=True).start()
+
+    # --- WORKER FUNCTIONS ---
+    def _scan_sensitive_files_worker(self):
         self.log_message("=" * 65)
         self.log_message(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] SCANNING USER DIRECTORY FOR UNPROTECTED SECRETS...")
         self.log_message("=" * 65)
@@ -127,6 +152,7 @@ class LocalSecAuditorApp(ctk.CTk):
         }
 
         scan_extensions = {".txt", ".json", ".env", ".ini", ".py", ".xml", ".yml", ".yaml", ".log"}
+        max_file_size_bytes = 5 * 1024 * 1024  # 5 MB Limit to avoid memory crashes
         findings_count = 0
 
         for target_dir in target_dirs:
@@ -141,6 +167,10 @@ class LocalSecAuditorApp(ctk.CTk):
                     if ext in scan_extensions:
                         file_path = os.path.join(root, file)
                         try:
+                            # Skip oversized files
+                            if os.path.getsize(file_path) > max_file_size_bytes:
+                                continue
+
                             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                                 content = f.read()
                                 for threat_type, pattern in patterns.items():
@@ -152,11 +182,13 @@ class LocalSecAuditorApp(ctk.CTk):
                             continue
 
         if findings_count == 0:
-            self.log_message("\n[OK] No plaintext passwords or API keys found in standard user folders.")
+            self.log_message("\n[OK] No plaintext passwords or API keys found in user folders.")
         else:
             self.log_message(f"\n[WARNING] Found {findings_count} potential plaintext secrets/credentials!")
 
-    def scan_network_ports(self):
+        self.toggle_buttons("normal")
+
+    def _scan_network_ports_worker(self):
         self.log_message("=" * 65)
         self.log_message(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INSPECTING LISTENING NETWORK PORTS...")
         self.log_message("=" * 65)
@@ -185,7 +217,9 @@ class LocalSecAuditorApp(ctk.CTk):
         except Exception as e:
             self.log_message(f"[ERROR] Failed to fetch network connections: {e}")
 
-    def scan_brute_force(self):
+        self.toggle_buttons("normal")
+
+    def _scan_brute_force_worker(self):
         self.log_message("=" * 65)
         self.log_message(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] SCANNING SECURITY LOGS FOR BRUTE-FORCE ATTEMPTS...")
         self.log_message("=" * 65)
@@ -193,10 +227,12 @@ class LocalSecAuditorApp(ctk.CTk):
         if not self.admin_status:
             self.log_message("[NOTICE] Windows limits raw Security Event Log reading to Administrator accounts.")
             self.log_message("[TIP] Standard User Mode is active. Use 'Scan Secrets & Hardcoded Keys' or 'Inspect Listening Ports'.")
+            self.toggle_buttons("normal")
             return
 
         if not WIN32_AVAILABLE:
             self.log_message("[ERROR] 'pywin32' library is missing.")
+            self.toggle_buttons("normal")
             return
 
         try:
@@ -232,6 +268,8 @@ class LocalSecAuditorApp(ctk.CTk):
 
         except Exception as e:
             self.log_message(f"[ERROR] Could not access Security Event Logs: {e}")
+
+        self.toggle_buttons("normal")
 
 
 if __name__ == "__main__":
