@@ -1,8 +1,6 @@
 import os
 import re
 import platform
-import tkinter as tk
-from tkinter import filedialog
 import streamlit as st
 
 # Streamlit Page Configuration
@@ -85,6 +83,8 @@ SUPPORTED_EXTS = {".py", ".ps1", ".sh", ".bat", ".cmd", ".c", ".cpp", ".js", ".t
 def select_folder_path():
     """Opens a native OS folder picker dialog over the browser window."""
     try:
+        import tkinter as tk
+        from tkinter import filedialog
         root = tk.Tk()
         root.withdraw()
         root.wm_attributes('-topmost', 1)
@@ -99,6 +99,8 @@ def select_folder_path():
 def select_file_path():
     """Opens a native OS file picker dialog over the browser window."""
     try:
+        import tkinter as tk
+        from tkinter import filedialog
         root = tk.Tk()
         root.withdraw()
         root.wm_attributes('-topmost', 1)
