@@ -1,17 +1,9 @@
 import os
 import re
 import platform
+import tkinter as tk
+from tkinter import filedialog
 import streamlit as st
-
-# Check if GUI display environment is available for Tkinter
-HAS_DISPLAY = True
-try:
-    import tkinter as tk
-    from tkinter import filedialog
-    if platform.system() != "Windows" and not os.environ.get("DISPLAY"):
-        HAS_DISPLAY = False
-except Exception:
-    HAS_DISPLAY = False
 
 # Streamlit Page Configuration
 st.set_page_config(
@@ -92,26 +84,34 @@ SUPPORTED_EXTS = {".py", ".ps1", ".sh", ".bat", ".cmd", ".c", ".cpp", ".js", ".t
 
 def select_folder_path():
     """Opens a native OS folder picker dialog over the browser window."""
-    root = tk.Tk()
-    root.withdraw()
-    root.wm_attributes('-topmost', 1)
-    folder_selected = filedialog.askdirectory(master=root, title="Select Directory to Scan")
-    root.destroy()
-    return folder_selected
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes('-topmost', 1)
+        folder_selected = filedialog.askdirectory(master=root, title="Select Directory to Scan")
+        root.destroy()
+        return folder_selected
+    except Exception:
+        st.error("Native file picker dialog is only supported when running locally on Windows.")
+        return ""
 
 
 def select_file_path():
     """Opens a native OS file picker dialog over the browser window."""
-    root = tk.Tk()
-    root.withdraw()
-    root.wm_attributes('-topmost', 1)
-    file_selected = filedialog.askopenfilename(
-        master=root, 
-        title="Select Script File to Scan",
-        filetypes=[("Script / Source Files", "*.py;*.ps1;*.sh;*.bat;*.cmd;*.c;*.cpp;*.js;*.txt"), ("All Files", "*.*")]
-    )
-    root.destroy()
-    return file_selected
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes('-topmost', 1)
+        file_selected = filedialog.askopenfilename(
+            master=root, 
+            title="Select Script File to Scan",
+            filetypes=[("Script / Source Files", "*.py;*.ps1;*.sh;*.bat;*.cmd;*.c;*.cpp;*.js;*.txt"), ("All Files", "*.*")]
+        )
+        root.destroy()
+        return file_selected
+    except Exception:
+        st.error("Native file picker dialog is only supported when running locally on Windows.")
+        return ""
 
 
 def analyze_code_content(content: str, filename: str):
@@ -145,42 +145,29 @@ tab_native, tab_paste = st.tabs(["📂 Browse", "📝 Paste Codes"])
 # --- TAB 1: NATIVE OS FILE / FOLDER BROWSER ---
 with tab_native:
     st.header("📂 Select Local File or Folder")
+    st.write("Click a button below to open your computer's native file or folder browser window.")
 
     if "target_path" not in st.session_state:
         st.session_state.target_path = ""
 
-    if HAS_DISPLAY:
-        st.write("Click a button below to open your computer's native file or folder browser window.")
-        col_btn1, col_btn2 = st.columns([1, 1])
+    col_btn1, col_btn2 = st.columns([1, 1])
 
-        if col_btn1.button("📁 Browse & Select Folder", type="secondary"):
-            try:
-                selected_dir = select_folder_path()
-                if selected_dir:
-                    st.session_state.target_path = selected_dir
-            except Exception as e:
-                st.error(f"Could not open folder picker: {e}")
+    if col_btn1.button("📁 Browse & Select Folder", type="secondary"):
+        selected_dir = select_folder_path()
+        if selected_dir:
+            st.session_state.target_path = selected_dir
 
-        if col_btn2.button("📄 Browse & Select File", type="secondary"):
-            try:
-                selected_file = select_file_path()
-                if selected_file:
-                    st.session_state.target_path = selected_file
-            except Exception as e:
-                st.error(f"Could not open file picker: {e}")
-    else:
-        st.info("🌐 Running on Cloud Environment: Enter path manually or use 'Paste Codes' tab.")
-        st.session_state.target_path = st.text_input(
-            "Enter path to file or folder:",
-            value=st.session_state.target_path or "."
-        )
+    if col_btn2.button("📄 Browse & Select File", type="secondary"):
+        selected_file = select_file_path()
+        if selected_file:
+            st.session_state.target_path = selected_file
 
     st.markdown(f"**Selected Target:** `{st.session_state.target_path or 'None Selected'}`")
 
     if st.button("Start Security Scan", type="primary"):
         target_path = st.session_state.target_path
         if not target_path or not os.path.exists(target_path):
-            st.warning("Please select or enter a valid target file/folder path first.")
+            st.warning("Please click one of the Browse buttons above to select a file or folder first.")
         else:
             findings = []
 
