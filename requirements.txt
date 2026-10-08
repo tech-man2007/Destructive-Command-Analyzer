@@ -1,4 +1,2 @@
-customtkinter
+streamlit
 psutil
-pywin32
-pyinstaller
