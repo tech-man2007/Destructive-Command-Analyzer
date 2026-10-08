@@ -1,5 +1,7 @@
 import os
 import sys
+import re
+import ctypes
 import psutil
 from datetime import datetime
 from collections import defaultdict
@@ -13,14 +15,25 @@ except ImportError:
     WIN32_AVAILABLE = False
 
 
+def is_admin():
+    """Check if the current process has Administrator privileges."""
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        return False
+
+
 class LocalSecAuditorApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         self.title("LocalSec Auditor - Standalone Security Inspector")
-        self.geometry("850x600")
+        self.geometry("850x620")
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
+
+        # Privilege Mode Check
+        self.admin_status = is_admin()
 
         # Top Title Bar
         self.header_label = ctk.CTkLabel(
@@ -28,12 +41,16 @@ class LocalSecAuditorApp(ctk.CTk):
             text="LocalSec Auditor", 
             font=ctk.CTkFont(size=22, weight="bold")
         )
-        self.header_label.pack(pady=(15, 5))
+        self.header_label.pack(pady=(15, 2))
 
+        status_text = "Mode: Administrator" if self.admin_status else "Mode: Standard User (Non-Admin)"
+        status_color = "#2fa572" if self.admin_status else "#e59400"
+        
         self.sub_header = ctk.CTkLabel(
             self, 
-            text="Windows System Audit & Brute-Force Log Analyzer", 
-            font=ctk.CTkFont(size=12)
+            text=f"Windows Security Inspector | {status_text}", 
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=status_color
         )
         self.sub_header.pack(pady=(0, 15))
 
@@ -41,24 +58,32 @@ class LocalSecAuditorApp(ctk.CTk):
         self.btn_frame = ctk.CTkFrame(self)
         self.btn_frame.pack(fill="x", padx=20, pady=5)
 
-        self.scan_logs_btn = ctk.CTkButton(
-            self.btn_frame, 
-            text="Scan Failed Logins (Event 4625)", 
-            command=self.scan_brute_force
-        )
-        self.scan_logs_btn.pack(side="left", padx=10, pady=10)
-
         self.scan_ports_btn = ctk.CTkButton(
             self.btn_frame, 
             text="Inspect Listening Ports", 
             command=self.scan_network_ports
         )
-        self.scan_ports_btn.pack(side="left", padx=10, pady=10)
+        self.scan_ports_btn.pack(side="left", padx=5, pady=10)
+
+        self.scan_secrets_btn = ctk.CTkButton(
+            self.btn_frame, 
+            text="Scan Secrets & Hardcoded Keys", 
+            command=self.scan_sensitive_files
+        )
+        self.scan_secrets_btn.pack(side="left", padx=5, pady=10)
+
+        self.scan_logs_btn = ctk.CTkButton(
+            self.btn_frame, 
+            text="Scan Failed Logins (Admin)", 
+            command=self.scan_brute_force
+        )
+        self.scan_logs_btn.pack(side="left", padx=5, pady=10)
 
         self.clear_btn = ctk.CTkButton(
             self.btn_frame, 
-            text="Clear Output", 
+            text="Clear", 
             fg_color="gray", 
+            width=60,
             command=self.clear_output
         )
         self.clear_btn.pack(side="right", padx=10, pady=10)
@@ -67,12 +92,14 @@ class LocalSecAuditorApp(ctk.CTk):
         self.output_textbox = ctk.CTkTextbox(
             self, 
             width=800, 
-            height=430, 
+            height=420, 
             font=ctk.CTkFont(family="Consolas", size=12)
         )
         self.output_textbox.pack(padx=20, pady=15, fill="both", expand=True)
 
-        self.log_message("[INFO] LocalSec Auditor initialized. Select a scan module above.\n")
+        self.log_message(f"[INFO] App Started in {'ADMINISTRATOR' if self.admin_status else 'STANDARD USER'} mode.")
+        if not self.admin_status:
+            self.log_message("[NOTE] Running as Standard User. Network Inspector & Secret Finder modules are fully enabled.\n")
 
     def log_message(self, text):
         self.output_textbox.insert("end", text + "\n")
@@ -81,57 +108,53 @@ class LocalSecAuditorApp(ctk.CTk):
     def clear_output(self):
         self.output_textbox.delete("1.0", "end")
 
-    def scan_brute_force(self):
+    def scan_sensitive_files(self):
         self.log_message("=" * 65)
-        self.log_message(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] SCANNING WINDOWS SECURITY LOGS FOR BRUTE-FORCE ATTEMPTS...")
+        self.log_message(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] SCANNING USER DIRECTORY FOR UNPROTECTED SECRETS...")
         self.log_message("=" * 65)
 
-        if not WIN32_AVAILABLE:
-            self.log_message("[ERROR] 'pywin32' library is not available. Please run: pip install pywin32")
-            return
+        user_home = os.path.expanduser("~")
+        target_dirs = [
+            os.path.join(user_home, "Downloads"),
+            os.path.join(user_home, "Documents"),
+            os.path.join(user_home, "Desktop")
+        ]
 
-        server = 'localhost'
-        log_type = 'Security'
+        patterns = {
+            "Plaintext Password": r"(?i)(password|passwd|pwd)\s*[:=]\s*['\"]?([^\s'\"]+)",
+            "API Key / Token": r"(?i)(api[_\-]?key|secret|token)\s*[:=]\s*['\"]?([a-zA-Z0-9_\-]{16,})",
+            "Private Key Header": r"-----BEGIN (RSA|OPENSSH|PRIVATE) KEY-----"
+        }
 
-        try:
-            hand = win32evtlog.OpenEventLog(server, log_type)
-            flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+        scan_extensions = {".txt", ".json", ".env", ".ini", ".py", ".xml", ".yml", ".yaml", ".log"}
+        findings_count = 0
+
+        for target_dir in target_dirs:
+            if not os.path.exists(target_dir):
+                continue
+
+            self.log_message(f"[+] Inspecting folder: {target_dir}")
             
-            failed_attempts_count = 0
-            user_failure_map = defaultdict(int)
+            for root, _, files in os.walk(target_dir):
+                for file in files:
+                    ext = os.path.splitext(file)[1].lower()
+                    if ext in scan_extensions:
+                        file_path = os.path.join(root, file)
+                        try:
+                            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                                content = f.read()
+                                for threat_type, pattern in patterns.items():
+                                    matches = re.findall(pattern, content)
+                                    if matches:
+                                        findings_count += 1
+                                        self.log_message(f"  [ALERT - {threat_type.upper()}] File: {file_path}")
+                        except Exception:
+                            continue
 
-            events = win32evtlog.ReadEventLog(hand, flags, 0)
-            
-            while events:
-                for event in events:
-                    # Event ID 4625 = Account Failed to Log On
-                    event_id = event.EventID & 0xFFFF
-                    if event_id == 4625:
-                        failed_attempts_count += 1
-                        time_generated = event.TimeGenerated.Format()
-                        
-                        # Extract account name if available in event strings
-                        user_name = "Unknown User"
-                        if event.StringInserts and len(event.StringInserts) > 5:
-                            user_name = event.StringInserts[5]
-                        
-                        user_failure_map[user_name] += 1
-
-                events = win32evtlog.ReadEventLog(hand, flags, 0)
-
-            win32evtlog.CloseEventLog(hand)
-
-            if failed_attempts_count == 0:
-                self.log_message("[OK] No failed logon events (Event ID 4625) recorded in recent security logs.")
-            else:
-                self.log_message(f"[WARNING] Detected {failed_attempts_count} total failed login attempt(s).\n")
-                self.log_message("Breakdown by Targeted Account:")
-                for user, count in user_failure_map.items():
-                    status = "[ALERT - POSSIBLE BRUTE FORCE]" if count >= 5 else "[NOTICE]"
-                    self.log_message(f"  {status} Account: '{user}' | Failures: {count}")
-
-        except Exception as e:
-            self.log_message(f"[ERROR] Could not read Windows Event Logs. Run CMD as Administrator. Details: {e}")
+        if findings_count == 0:
+            self.log_message("\n[OK] No plaintext passwords or API keys found in standard user folders.")
+        else:
+            self.log_message(f"\n[WARNING] Found {findings_count} potential plaintext secrets/credentials!")
 
     def scan_network_ports(self):
         self.log_message("=" * 65)
@@ -160,7 +183,55 @@ class LocalSecAuditorApp(ctk.CTk):
             self.log_message(f"\n[OK] Total listening services identified: {len(listening_ports)}")
 
         except Exception as e:
-            self.log_message(f"[ERROR] Failed to fetch active network connections: {e}")
+            self.log_message(f"[ERROR] Failed to fetch network connections: {e}")
+
+    def scan_brute_force(self):
+        self.log_message("=" * 65)
+        self.log_message(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] SCANNING SECURITY LOGS FOR BRUTE-FORCE ATTEMPTS...")
+        self.log_message("=" * 65)
+
+        if not self.admin_status:
+            self.log_message("[NOTICE] Windows limits raw Security Event Log reading to Administrator accounts.")
+            self.log_message("[TIP] Standard User Mode is active. Use 'Scan Secrets & Hardcoded Keys' or 'Inspect Listening Ports'.")
+            return
+
+        if not WIN32_AVAILABLE:
+            self.log_message("[ERROR] 'pywin32' library is missing.")
+            return
+
+        try:
+            hand = win32evtlog.OpenEventLog('localhost', 'Security')
+            flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+            
+            failed_attempts_count = 0
+            user_failure_map = defaultdict(int)
+
+            events = win32evtlog.ReadEventLog(hand, flags, 0)
+            
+            while events:
+                for event in events:
+                    event_id = event.EventID & 0xFFFF
+                    if event_id == 4625:
+                        failed_attempts_count += 1
+                        user_name = "Unknown User"
+                        if event.StringInserts and len(event.StringInserts) > 5:
+                            user_name = event.StringInserts[5]
+                        user_failure_map[user_name] += 1
+
+                events = win32evtlog.ReadEventLog(hand, flags, 0)
+
+            win32evtlog.CloseEventLog(hand)
+
+            if failed_attempts_count == 0:
+                self.log_message("[OK] No failed logon events (Event ID 4625) recorded.")
+            else:
+                self.log_message(f"[WARNING] Detected {failed_attempts_count} failed login attempt(s).\n")
+                for user, count in user_failure_map.items():
+                    status = "[ALERT - POSSIBLE BRUTE FORCE]" if count >= 5 else "[NOTICE]"
+                    self.log_message(f"  {status} Account: '{user}' | Failures: {count}")
+
+        except Exception as e:
+            self.log_message(f"[ERROR] Could not access Security Event Logs: {e}")
 
 
 if __name__ == "__main__":
