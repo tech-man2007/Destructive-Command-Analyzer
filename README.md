@@ -171,14 +171,29 @@ Streamlit will print a local URL in the terminal, typically
 
 ``` text
 Destructive-Command-Analyzer/
+├── .gitignore
 ├── main.py
+├── README.md
 ├── requirements.txt
+├── Detection/
+│   └── vulnerable.py
+├── No Detection/
+│   └── safe.py
 └── screenshots/
     ├── 1.png
     ├── 2.png
     ├── 3.png
     └── 4.png
 ```
+
+-   `main.py` --- Streamlit application and rule-based code analyzer.
+-   `requirements.txt` --- Python dependencies.
+-   `Detection/vulnerable.py` --- Example file containing potentially
+    dangerous patterns for testing detection.
+-   `No Detection/safe.py` --- Example file intended to demonstrate code
+    without the configured suspicious patterns.
+-   `screenshots/` --- Application screenshots displayed in this README.
+-   `.gitignore` --- Specifies files Git should ignore.
 
 ## Limitations
 
