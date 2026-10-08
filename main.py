@@ -103,7 +103,7 @@ tab_native, tab_paste = st.tabs(["📂 Browse", "📝 Paste Codes"])
 
 # --- TAB 1: BROWSE FILES ---
 with tab_native:
-    st.header("📂 Select Local File or Files")
+    st.header("📂 Select Local Files")
     st.write("Click below to open your computer's native file picker window and select files to scan.")
 
     uploaded_files = st.file_uploader(
