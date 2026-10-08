@@ -1,12 +1,13 @@
 import os
 import re
 import platform
+import tkinter as tk
+from tkinter import filedialog
 import streamlit as st
 
 # Streamlit Page Configuration
 st.set_page_config(
-    page_title="CodeSec - Destructive Command Analyzer",
-    page_icon="⚠️",
+    page_title="Destructive Command Analyzer",
     layout="wide"
 )
 
@@ -74,6 +75,36 @@ RULES = [
     }
 ]
 
+IGNORE_DIRS = {
+    "venv", ".venv", "env", "site-packages", "node_modules", 
+    "__pycache__", ".git", "vendor", "$recycle.bin", "system volume information"
+}
+SUPPORTED_EXTS = {".py", ".ps1", ".sh", ".bat", ".cmd", ".c", ".cpp", ".js", ".txt"}
+
+
+def select_folder_path():
+    """Opens a native OS folder picker dialog over the browser window."""
+    root = tk.Tk()
+    root.withdraw()
+    root.wm_attributes('-topmost', 1)
+    folder_selected = filedialog.askdirectory(master=root, title="Select Directory to Scan")
+    root.destroy()
+    return folder_selected
+
+
+def select_file_path():
+    """Opens a native OS file picker dialog over the browser window."""
+    root = tk.Tk()
+    root.withdraw()
+    root.wm_attributes('-topmost', 1)
+    file_selected = filedialog.askopenfilename(
+        master=root, 
+        title="Select Script File to Scan",
+        filetypes=[("Script / Source Files", "*.py;*.ps1;*.sh;*.bat;*.cmd;*.c;*.cpp;*.js;*.txt"), ("All Files", "*.*")]
+    )
+    root.destroy()
+    return file_selected
+
 
 def analyze_code_content(content: str, filename: str):
     """Parses text line-by-line and checks against risk rules."""
@@ -81,7 +112,6 @@ def analyze_code_content(content: str, filename: str):
     lines = content.splitlines()
 
     for line_num, line_text in enumerate(lines, start=1):
-        # Skip empty lines or pure standard comments
         stripped = line_text.strip()
         if not stripped:
             continue
@@ -90,7 +120,7 @@ def analyze_code_content(content: str, filename: str):
             match = re.search(rule["pattern"], line_text)
             if match:
                 findings.append({
-                    "File": filename,
+                    "Source": filename,
                     "Line": line_num,
                     "Severity": rule["severity"],
                     "Category": rule["category"],
@@ -102,58 +132,89 @@ def analyze_code_content(content: str, filename: str):
 
 
 # Input Method Tabs
-tab_upload, tab_path = st.tabs(["📄 Inspect Uploaded File(s)", "📂 Inspect Local System Path"])
+tab_native, tab_paste = st.tabs(["📂 Browse", "📝 Paste Codes"])
 
-# --- TAB 1: FILE UPLOAD SCANNER ---
-with tab_upload:
-    uploaded_files = st.file_uploader(
-        "Upload source code or script files (.py, .ps1, .sh, .bat, .c, .cpp, .js):",
-        accept_multiple_files=True,
-        type=["py", "ps1", "sh", "bat", "cmd", "c", "cpp", "js", "txt"]
-    )
+# --- TAB 1: NATIVE OS FILE / FOLDER BROWSER ---
+with tab_native:
+    st.header("📂 Select Local File or Folder")
+    st.write("Click a button below to open your computer's native file or folder browser window.")
 
-    if st.button("Analyze Selected Files", type="primary"):
-        if not uploaded_files:
-            st.warning("Please upload at least one file.")
+    if "target_path" not in st.session_state:
+        st.session_state.target_path = ""
+
+    col_btn1, col_btn2 = st.columns([1, 1])
+
+    if col_btn1.button("📁 Browse & Select Folder", type="secondary"):
+        selected_dir = select_folder_path()
+        if selected_dir:
+            st.session_state.target_path = selected_dir
+
+    if col_btn2.button("📄 Browse & Select File", type="secondary"):
+        selected_file = select_file_path()
+        if selected_file:
+            st.session_state.target_path = selected_file
+
+    st.markdown(f"**Selected Target:** `{st.session_state.target_path or 'None Selected'}`")
+
+    if st.button("Start Security Scan", type="primary"):
+        target_path = st.session_state.target_path
+        if not target_path or not os.path.exists(target_path):
+            st.warning("Please click one of the Browse buttons above to select a file or folder first.")
         else:
-            all_findings = []
-            for file in uploaded_files:
-                try:
-                    content = file.read().decode("utf-8", errors="ignore")
-                    results = analyze_code_content(content, file.name)
-                    all_findings.extend(results)
-                except Exception as e:
-                    st.error(f"Failed to process {file.name}: {e}")
+            findings = []
 
-            if all_findings:
-                st.error(f"🚨 Detected {len(all_findings)} potential threat(s) across uploaded file(s)!")
-                st.dataframe(all_findings, use_container_width=True)
+            # 1. Single File Scan
+            if os.path.isfile(target_path):
+                try:
+                    with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                    findings = analyze_code_content(content, os.path.basename(target_path))
+                except Exception as e:
+                    st.error(f"Could not read file: {e}")
+
+            # 2. Entire Directory Scan
+            elif os.path.isdir(target_path):
+                for root, dirs, files in os.walk(target_path):
+                    dirs[:] = [d for d in dirs if d.lower() not in IGNORE_DIRS and not d.startswith('.')]
+
+                    for file in files:
+                        ext = os.path.splitext(file)[1].lower()
+                        if ext in SUPPORTED_EXTS:
+                            file_path = os.path.join(root, file)
+                            try:
+                                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                                    content = f.read()
+                                results = analyze_code_content(content, os.path.relpath(file_path, target_path))
+                                findings.extend(results)
+                            except Exception:
+                                continue
+
+            if findings:
+                st.error(f"🚨 Detected {len(findings)} potential threat(s)!")
+                st.dataframe(findings, use_container_width=True)
             else:
                 st.success("✅ Clean Code: No destructive commands or malicious execution patterns identified.")
 
-# --- TAB 2: LOCAL PATH FILE SCANNER ---
-with tab_path:
-    target_file_path = st.text_input(
-        "Enter path to a specific file on the machine:",
-        value=""
+
+# --- TAB 2: PASTE CODE DIRECTLY ---
+with tab_paste:
+    st.header("📝 Code Vulnerability & Command Inspector")
+    st.write("Paste raw code or script commands below to analyze for security risks and destructive patterns.")
+
+    pasted_code = st.text_area(
+        "Paste Code Block Here:",
+        height=320,
+        placeholder="Paste your Python, PowerShell, Bash, Batch, or C/C++ code here..."
     )
 
-    if st.button("Scan Local File", type="primary"):
-        if not target_file_path or not os.path.exists(target_file_path):
-            st.error("Please enter a valid file path.")
-        elif os.path.isdir(target_file_path):
-            st.warning("Please enter a path to a specific file, not a folder.")
+    if st.button("Analyze Pasted Code", type="primary"):
+        if not pasted_code.strip():
+            st.warning("Please paste some code into the text area before running the analysis.")
         else:
-            try:
-                with open(target_file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
+            results = analyze_code_content(pasted_code, "Pasted Code Block")
 
-                results = analyze_code_content(content, os.path.basename(target_file_path))
-
-                if results:
-                    st.error(f"🚨 Detected {len(results)} potential threat(s) in `{target_file_path}`!")
-                    st.dataframe(results, use_container_width=True)
-                else:
-                    st.success(f"✅ Clean Code: No harmful commands found in `{target_file_path}`.")
-            except Exception as e:
-                st.error(f"Could not read file: {e}")
+            if results:
+                st.error(f"🚨 Detected {len(results)} potential threat(s) in pasted code!")
+                st.dataframe(results, use_container_width=True)
+            else:
+                st.success("✅ Clean Code: No destructive commands or malicious execution patterns identified.")
