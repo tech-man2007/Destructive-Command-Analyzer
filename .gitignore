@@ -1,0 +1,17 @@
+# Virtual Environment
+venv/
+.venv/
+
+# Python Bytecode & Cache
+__pycache__/
+*.pyc
+
+# PyInstaller Build Output
+build/
+dist/
+*.spec
+
+# Logs & Audit Output Reports
+*.log
+*.evtx
+reports/
