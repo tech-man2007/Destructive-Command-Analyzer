@@ -6,6 +6,7 @@ import threading
 import psutil
 from datetime import datetime
 from collections import defaultdict
+from tkinter import filedialog
 import customtkinter as ctk
 
 # Windows Event Log handling via pywin32
@@ -68,7 +69,7 @@ class LocalSecAuditorApp(ctk.CTk):
 
         self.scan_secrets_btn = ctk.CTkButton(
             self.btn_frame, 
-            text="Scan Secrets & Hardcoded Keys", 
+            text="Scan Secrets in Directory", 
             command=self.start_secret_scan
         )
         self.scan_secrets_btn.pack(side="left", padx=5, pady=10)
@@ -121,8 +122,22 @@ class LocalSecAuditorApp(ctk.CTk):
 
     # --- THREAD WRAPPERS ---
     def start_secret_scan(self):
+        # Open directory selection dialog
+        selected_directory = filedialog.askdirectory(
+            title="Select Directory to Scan for Secrets",
+            initialdir=os.path.expanduser("~")
+        )
+
+        if not selected_directory:
+            self.log_message("[INFO] Directory selection canceled.")
+            return
+
         self.toggle_buttons("disabled")
-        threading.Thread(target=self._scan_sensitive_files_worker, daemon=True).start()
+        threading.Thread(
+            target=self._scan_sensitive_files_worker, 
+            args=(selected_directory,), 
+            daemon=True
+        ).start()
 
     def start_port_scan(self):
         self.toggle_buttons("disabled")
@@ -133,17 +148,17 @@ class LocalSecAuditorApp(ctk.CTk):
         threading.Thread(target=self._scan_brute_force_worker, daemon=True).start()
 
     # --- WORKER FUNCTIONS ---
-    def _scan_sensitive_files_worker(self):
+    def _scan_sensitive_files_worker(self, target_dir):
         self.log_message("=" * 65)
-        self.log_message(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] SCANNING USER DIRECTORY FOR UNPROTECTED SECRETS...")
+        self.log_message(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] SCANNING DIRECTORY FOR UNPROTECTED SECRETS...")
+        self.log_message(f"[+] Target Path: {target_dir}")
         self.log_message("=" * 65)
 
-        user_home = os.path.expanduser("~")
-        target_dirs = [
-            os.path.join(user_home, "Downloads"),
-            os.path.join(user_home, "Documents"),
-            os.path.join(user_home, "Desktop")
-        ]
+        # Ignore noisy build, virtualenv, and library subdirectories
+        ignore_dirs = {
+            "venv", ".venv", "env", "site-packages", "node_modules", 
+            "__pycache__", ".git", "vendor", "octave-11.3.0-w64", "Orange3-3.40.0"
+        }
 
         patterns = {
             "Plaintext Password": r"(?i)(password|passwd|pwd)\s*[:=]\s*['\"]?([^\s'\"]+)",
@@ -152,37 +167,33 @@ class LocalSecAuditorApp(ctk.CTk):
         }
 
         scan_extensions = {".txt", ".json", ".env", ".ini", ".py", ".xml", ".yml", ".yaml", ".log"}
-        max_file_size_bytes = 5 * 1024 * 1024  # 5 MB Limit to avoid memory crashes
+        max_file_size_bytes = 5 * 1024 * 1024  # 5 MB safety limit
         findings_count = 0
 
-        for target_dir in target_dirs:
-            if not os.path.exists(target_dir):
-                continue
+        for root, dirs, files in os.walk(target_dir):
+            # Prune skipped directories in-place
+            dirs[:] = [d for d in dirs if d.lower() not in ignore_dirs and not d.startswith('.')]
 
-            self.log_message(f"[+] Inspecting folder: {target_dir}")
-            
-            for root, _, files in os.walk(target_dir):
-                for file in files:
-                    ext = os.path.splitext(file)[1].lower()
-                    if ext in scan_extensions:
-                        file_path = os.path.join(root, file)
-                        try:
-                            # Skip oversized files
-                            if os.path.getsize(file_path) > max_file_size_bytes:
-                                continue
-
-                            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                                content = f.read()
-                                for threat_type, pattern in patterns.items():
-                                    matches = re.findall(pattern, content)
-                                    if matches:
-                                        findings_count += 1
-                                        self.log_message(f"  [ALERT - {threat_type.upper()}] File: {file_path}")
-                        except Exception:
+            for file in files:
+                ext = os.path.splitext(file)[1].lower()
+                if ext in scan_extensions:
+                    file_path = os.path.join(root, file)
+                    try:
+                        if os.path.getsize(file_path) > max_file_size_bytes:
                             continue
 
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                            for threat_type, pattern in patterns.items():
+                                matches = re.findall(pattern, content)
+                                if matches:
+                                    findings_count += 1
+                                    self.log_message(f"  [ALERT - {threat_type.upper()}] File: {file_path}")
+                    except Exception:
+                        continue
+
         if findings_count == 0:
-            self.log_message("\n[OK] No plaintext passwords or API keys found in user folders.")
+            self.log_message("\n[OK] No plaintext passwords or API keys found in the selected folder.")
         else:
             self.log_message(f"\n[WARNING] Found {findings_count} potential plaintext secrets/credentials!")
 
@@ -226,7 +237,7 @@ class LocalSecAuditorApp(ctk.CTk):
 
         if not self.admin_status:
             self.log_message("[NOTICE] Windows limits raw Security Event Log reading to Administrator accounts.")
-            self.log_message("[TIP] Standard User Mode is active. Use 'Scan Secrets & Hardcoded Keys' or 'Inspect Listening Ports'.")
+            self.log_message("[TIP] Standard User Mode is active. Use 'Scan Secrets in Directory' or 'Inspect Listening Ports'.")
             self.toggle_buttons("normal")
             return
 
