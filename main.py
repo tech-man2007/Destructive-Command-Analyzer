@@ -1,6 +1,5 @@
 import os
 import re
-import platform
 import streamlit as st
 
 # Streamlit Page Configuration
@@ -73,48 +72,6 @@ RULES = [
     }
 ]
 
-IGNORE_DIRS = {
-    "venv", ".venv", "env", "site-packages", "node_modules", 
-    "__pycache__", ".git", "vendor", "$recycle.bin", "system volume information"
-}
-SUPPORTED_EXTS = {".py", ".ps1", ".sh", ".bat", ".cmd", ".c", ".cpp", ".js", ".txt"}
-
-
-def select_folder_path():
-    """Opens a native OS folder picker dialog over the browser window."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        root.wm_attributes('-topmost', 1)
-        folder_selected = filedialog.askdirectory(master=root, title="Select Directory to Scan")
-        root.destroy()
-        return folder_selected
-    except Exception:
-        st.error("Native file picker dialog is only supported when running locally on Windows.")
-        return ""
-
-
-def select_file_path():
-    """Opens a native OS file picker dialog over the browser window."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        root.wm_attributes('-topmost', 1)
-        file_selected = filedialog.askopenfilename(
-            master=root, 
-            title="Select Script File to Scan",
-            filetypes=[("Script / Source Files", "*.py;*.ps1;*.sh;*.bat;*.cmd;*.c;*.cpp;*.js;*.txt"), ("All Files", "*.*")]
-        )
-        root.destroy()
-        return file_selected
-    except Exception:
-        st.error("Native file picker dialog is only supported when running locally on Windows.")
-        return ""
-
 
 def analyze_code_content(content: str, filename: str):
     """Parses text line-by-line and checks against risk rules."""
@@ -144,60 +101,29 @@ def analyze_code_content(content: str, filename: str):
 # Input Method Tabs
 tab_native, tab_paste = st.tabs(["📂 Browse", "📝 Paste Codes"])
 
-# --- TAB 1: NATIVE OS FILE / FOLDER BROWSER ---
+# --- TAB 1: BROWSE FILES ---
 with tab_native:
-    st.header("📂 Select Local File or Folder")
-    st.write("Click a button below to open your computer's native file or folder browser window.")
+    st.header("📂 Select Local File or Files")
+    st.write("Click below to open your computer's native file picker window and select files to scan.")
 
-    if "target_path" not in st.session_state:
-        st.session_state.target_path = ""
-
-    col_btn1, col_btn2 = st.columns([1, 1])
-
-    if col_btn1.button("📁 Browse & Select Folder", type="secondary"):
-        selected_dir = select_folder_path()
-        if selected_dir:
-            st.session_state.target_path = selected_dir
-
-    if col_btn2.button("📄 Browse & Select File", type="secondary"):
-        selected_file = select_file_path()
-        if selected_file:
-            st.session_state.target_path = selected_file
-
-    st.markdown(f"**Selected Target:** `{st.session_state.target_path or 'None Selected'}`")
+    uploaded_files = st.file_uploader(
+        "Choose script or source code files:",
+        accept_multiple_files=True,
+        type=["py", "ps1", "sh", "bat", "cmd", "c", "cpp", "js", "txt"]
+    )
 
     if st.button("Start Security Scan", type="primary"):
-        target_path = st.session_state.target_path
-        if not target_path or not os.path.exists(target_path):
-            st.warning("Please click one of the Browse buttons above to select a file or folder first.")
+        if not uploaded_files:
+            st.warning("Please select at least one file using the file browser above.")
         else:
             findings = []
-
-            # 1. Single File Scan
-            if os.path.isfile(target_path):
+            for file in uploaded_files:
                 try:
-                    with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
-                    findings = analyze_code_content(content, os.path.basename(target_path))
+                    content = file.read().decode("utf-8", errors="ignore")
+                    results = analyze_code_content(content, file.name)
+                    findings.extend(results)
                 except Exception as e:
-                    st.error(f"Could not read file: {e}")
-
-            # 2. Entire Directory Scan
-            elif os.path.isdir(target_path):
-                for root, dirs, files in os.walk(target_path):
-                    dirs[:] = [d for d in dirs if d.lower() not in IGNORE_DIRS and not d.startswith('.')]
-
-                    for file in files:
-                        ext = os.path.splitext(file)[1].lower()
-                        if ext in SUPPORTED_EXTS:
-                            file_path = os.path.join(root, file)
-                            try:
-                                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                                    content = f.read()
-                                results = analyze_code_content(content, os.path.relpath(file_path, target_path))
-                                findings.extend(results)
-                            except Exception:
-                                continue
+                    st.error(f"Could not read {file.name}: {e}")
 
             if findings:
                 st.error(f"🚨 Detected {len(findings)} potential threat(s)!")
