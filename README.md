@@ -1,4 +1,4 @@
-# ⚠️ Static Code Security & Destructive Command Analyzer
+# Static Code Security & Destructive Command Analyzer
 
 A Streamlit-based static analysis tool that scans source code and
 scripts for potentially destructive commands, suspicious execution
@@ -231,10 +231,3 @@ Contributions and suggestions are welcome. To propose an improvement:
 
 When adding detection rules, include a clear category, severity,
 explanation, and test examples for both matching and non-matching input.
-
-## License
-
-No license information was provided here. Unless a license is added to
-the repository, assume that standard copyright restrictions apply.
-Consider adding a `LICENSE` file if you want to specify how others may
-use, modify, and distribute this project.
