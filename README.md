@@ -4,7 +4,8 @@ A Streamlit-based static analysis tool that scans source code and
 scripts for potentially destructive commands, suspicious execution
 patterns, and security-control tampering.
 
-**Live application:** https://dca-jagan.streamlit.app/\
+**Live application:** https://dca-jagan.streamlit.app
+
 **GitHub repository:**
 https://github.com/tech-man2007/Destructive-Command-Analyzer
 
